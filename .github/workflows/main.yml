@@ -1,0 +1,81 @@
+name: BTC Polymarket 15m Backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows:
+        description: 回测轮数
+        required: true
+        default: "960"
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Download project
+        run: |
+          curl -L "https://github.com/user-attachments/files/30051712/btc_consensus_v3.zip" -o project.zip
+          unzip project.zip -d app
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        working-directory: app
+        run: pip install -r requirements.txt
+
+      - name: Download Polymarket history
+        working-directory: app
+        run: |
+          python polymarket_history.py \
+            --anchor-slug btc-updown-15m-1784117700 \
+            --windows "${{ inputs.windows }}" \
+            --decision-minute 5 \
+            --out pm_history.csv
+
+      - name: Download Binance data
+        working-directory: app
+        run: |
+          python fetch_binance.py \
+            --days 15 \
+            --interval 1m \
+            --out BTCUSDT_1m.csv
+
+      - name: Train 31 agents
+        working-directory: app
+        run: |
+          python polymarket_15m.py \
+            --csv BTCUSDT_1m.csv \
+            --decision-minute 5 \
+            --min-train 672 \
+            --out pm15
+
+      - name: Normalize prediction timestamps
+        working-directory: app
+        run: |
+          python -c "import pandas as pd; p=pd.read_csv('pm15_predictions.csv'); p.rename(columns={p.columns[0]:'timestamp'}).to_csv('pm15_predictions.csv',index=False)"
+
+      - name: Exact Polymarket backtest
+        working-directory: app
+        run: |
+          python market_backtest.py \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --stake 10 \
+            --slippage 0.01 \
+            --out exact_report.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: btc-polymarket-results
+          path: |
+            app/*.json
+            app/*.csv
+            app/*.graphml
+          retention-days: 30

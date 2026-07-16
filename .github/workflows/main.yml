@@ -40,9 +40,10 @@ jobs:
       - name: Download Binance data
         working-directory: app
         run: |
+          sed -i "s/'interval':'5m'/'interval':'1m'/" fetch_binance.py
+          sed -i 's/+300000/+60000/' fetch_binance.py
           python fetch_binance.py \
             --days 15 \
-            --interval 1m \
             --out BTCUSDT_1m.csv
 
       - name: Train 31 agents

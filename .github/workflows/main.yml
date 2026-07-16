@@ -7,6 +7,16 @@ on:
         description: 回测轮数
         required: true
         default: "960"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/main.yml"
+  schedule:
+    - cron: "15 0 * * *"
+
+concurrency:
+  group: btc-polymarket-15m-backtest
+  cancel-in-progress: false
 
 jobs:
   backtest:
@@ -33,7 +43,7 @@ jobs:
         run: |
           python polymarket_history.py \
             --anchor-slug btc-updown-15m-1784117700 \
-            --windows "${{ inputs.windows }}" \
+            --windows "${{ inputs.windows || '960' }}" \
             --decision-minute 5 \
             --out pm_history.csv
 

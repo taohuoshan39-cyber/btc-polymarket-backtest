@@ -12,7 +12,11 @@ on:
     paths:
       - ".github/workflows/main.yml"
   schedule:
+    # GitHub cron uses UTC; 00:15 UTC = 08:15 China Standard Time.
     - cron: "15 0 * * *"
+
+env:
+  TZ: Asia/Shanghai
 
 concurrency:
   group: btc-polymarket-15m-backtest

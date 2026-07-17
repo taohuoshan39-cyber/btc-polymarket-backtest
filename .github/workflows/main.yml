@@ -56,6 +56,7 @@ jobs:
         run: |
           sed -i "s/'interval':'5m'/'interval':'1m'/" fetch_binance.py
           sed -i 's/+300000/+60000/' fetch_binance.py
+          sed -i 's#https://api.binance.com#https://data-api.binance.vision#' fetch_binance.py
           python fetch_binance.py \
             --days 15 \
             --out BTCUSDT_1m.csv

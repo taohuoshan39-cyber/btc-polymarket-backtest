@@ -54,6 +54,8 @@ def main() -> None:
     ap.add_argument("--kelly-fraction", type=float, default=0.25)
     ap.add_argument("--max-position", type=float, default=0.02)
     ap.add_argument("--warmup", type=int, default=40)
+    ap.add_argument("--min-votes", type=int, default=28)
+    ap.add_argument("--min-paid", type=float, default=0.0)
     a = ap.parse_args()
 
     z = load_events(a.markets, a.predictions)
@@ -78,6 +80,18 @@ def main() -> None:
         paid = min(0.99, market_price + a.slippage)
         correct = direction == actual
         day = pd.to_datetime(int(r["start_ts"]), unit="s", utc=True).strftime("%Y-%m-%d")
+
+        vote_strength = max(int(r["up_votes"]), int(r["down_votes"]))
+        if vote_strength < a.min_votes:
+            skipped["weak_consensus"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
+        if paid < a.min_paid:
+            skipped["price_below_winrate_floor"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
 
         # Decrement pauses on eligible market signals, not wall-clock time.
         if cooldown > 0:
@@ -209,10 +223,13 @@ def main() -> None:
         "return_on_turnover": float(profit / turnover) if turnover else None,
         "ending_bankroll": float(bankroll),
         "max_drawdown": max_dd,
+        "max_drawdown_pct": float(((trades.bankroll - trades.bankroll.cummax()) / trades.bankroll.cummax()).min()) if len(trades) else None,
         "sharpe_per_trade": sharpe,
         "skipped": dict(skipped),
         "rules": {
             "minimum_calibrated_edge": a.edge,
+            "minimum_votes": a.min_votes,
+            "minimum_paid_price": a.min_paid,
             "quarter_kelly_cap": a.max_position,
             "two_losses": "halve position",
             "three_losses": "cool down 4 eligible signals",

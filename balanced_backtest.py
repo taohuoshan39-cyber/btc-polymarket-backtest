@@ -76,6 +76,13 @@ def main() -> None:
     ap.add_argument("--profit-reinvest", type=float, default=0.0)
     ap.add_argument("--fixed-stake", type=float, default=0.0)
     ap.add_argument("--daily-stop", type=float, default=0.04)
+    ap.add_argument("--pretrade-regime-filter", action="store_true")
+    ap.add_argument("--max-vol-ratio", type=float, default=1.8)
+    ap.add_argument("--max-range-ratio", type=float, default=2.2)
+    ap.add_argument("--max-shock-z", type=float, default=3.0)
+    ap.add_argument("--require-executed-trades", action="store_true")
+    ap.add_argument("--max-vwap-deviation", type=float, default=0.0)
+    ap.add_argument("--max-complement-gap", type=float, default=0.0)
     a = ap.parse_args()
 
     z = load_events(a.markets, a.predictions, a.btc)
@@ -99,6 +106,26 @@ def main() -> None:
         day = pd.to_datetime(int(r.start_ts), unit="s", utc=True).strftime("%Y-%m-%d")
 
         abnormal = bool(r.abnormal_regime)
+        if a.pretrade_regime_filter and (
+            float(r.vol_ratio) > a.max_vol_ratio
+            or float(r.range_ratio) > a.max_range_ratio
+            or float(r.shock_z) > a.max_shock_z
+        ):
+            skipped["extreme_regime"] += 1
+            continue
+        if a.require_executed_trades and r.get("price_source") != "executed_trade":
+            skipped["no_executed_trade"] += 1
+            continue
+        selected_vwap = r.get("up_vwap_60s") if direction == 1 else r.get("down_vwap_60s")
+        if a.max_vwap_deviation > 0 and (
+            pd.isna(selected_vwap) or abs(price - float(selected_vwap)) > a.max_vwap_deviation
+        ):
+            skipped["unstable_trade_price"] += 1
+            continue
+        complement_gap = abs(float(r.get("up_price", 0.5)) + float(r.get("down_price", 0.5)) - 1.0)
+        if a.max_complement_gap > 0 and complement_gap > a.max_complement_gap:
+            skipped["incoherent_complement_prices"] += 1
+            continue
         if regime_paused:
             normal_regime_streak = normal_regime_streak + 1 if not abnormal else 0
             paper_results.append(int(correct))
@@ -184,6 +211,8 @@ def main() -> None:
                 "vol_ratio": float(r.vol_ratio),
                 "range_ratio": float(r.range_ratio),
                 "shock_z": float(r.shock_z),
+                "vwap_deviation": None if pd.isna(selected_vwap) else abs(price - float(selected_vwap)),
+                "complement_gap": complement_gap,
             }
         )
 
@@ -215,6 +244,13 @@ def main() -> None:
             "daily_stop": "disabled" if a.daily_stop <= 0 else f"{a.daily_stop:.1%} of bankroll",
             "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",
             "profit_lock": "enabled" if a.profit_reinvest <= 0 else "disabled/full reinvest",
+            "pretrade_regime_filter": a.pretrade_regime_filter,
+            "maximum_volatility_ratio": a.max_vol_ratio,
+            "maximum_range_ratio": a.max_range_ratio,
+            "maximum_shock_z": a.max_shock_z,
+            "require_executed_trades": a.require_executed_trades,
+            "maximum_vwap_deviation": a.max_vwap_deviation,
+            "maximum_complement_gap": a.max_complement_gap,
             "price_tiers": "add size below 0.70; cut size above 0.82",
         },
         "research_warning": "Backtest only; parameters require longer walk-forward validation.",

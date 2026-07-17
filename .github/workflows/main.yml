@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: balanced-v3-regime-gate
+# Strategy: balanced-v4-full-resume
 
 on:
   workflow_dispatch:

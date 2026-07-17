@@ -56,6 +56,12 @@ def main() -> None:
     ap.add_argument("--warmup", type=int, default=40)
     ap.add_argument("--min-votes", type=int, default=28)
     ap.add_argument("--min-paid", type=float, default=0.0)
+    ap.add_argument("--profit-reinvest", type=float, default=1.0)
+    ap.add_argument("--risk-capital-cap", type=float, default=0.0)
+    ap.add_argument("--dd-soft", type=float, default=0.04)
+    ap.add_argument("--dd-hard", type=float, default=0.07)
+    ap.add_argument("--dd-soft-mult", type=float, default=0.70)
+    ap.add_argument("--dd-hard-mult", type=float, default=0.40)
     a = ap.parse_args()
 
     z = load_events(a.markets, a.predictions)
@@ -141,10 +147,19 @@ def main() -> None:
             continue
 
         full_kelly = max(0.0, edge / max(1e-9, 1.0 - paid))
-        fraction = min(a.max_position, a.kelly_fraction * full_kelly)
+        current_dd = (bankroll - peak) / peak if peak else 0.0
+        dd_mult = (
+            a.dd_hard_mult
+            if current_dd <= -a.dd_hard
+            else (a.dd_soft_mult if current_dd <= -a.dd_soft else 1.0)
+        )
+        fraction = min(a.max_position, a.kelly_fraction * full_kelly) * dd_mult
         if loss_streak >= 2 or recovery_wins < 2:
             fraction *= 0.5
-        stake = bankroll * fraction
+        risk_capital = a.bankroll + max(0.0, bankroll - a.bankroll) * a.profit_reinvest
+        if a.risk_capital_cap > 0:
+            risk_capital = min(risk_capital, a.risk_capital_cap)
+        stake = risk_capital * fraction
         if stake < 1.0:
             skipped["stake_too_small"] += 1
             outcomes.append(int(correct))
@@ -230,6 +245,14 @@ def main() -> None:
             "minimum_calibrated_edge": a.edge,
             "minimum_votes": a.min_votes,
             "minimum_paid_price": a.min_paid,
+            "profit_reinvest_fraction": a.profit_reinvest,
+            "risk_capital_cap": a.risk_capital_cap,
+            "drawdown_throttle": {
+                "soft_drawdown": a.dd_soft,
+                "soft_multiplier": a.dd_soft_mult,
+                "hard_drawdown": a.dd_hard,
+                "hard_multiplier": a.dd_hard_mult,
+            },
             "quarter_kelly_cap": a.max_position,
             "two_losses": "halve position",
             "three_losses": "cool down 4 eligible signals",

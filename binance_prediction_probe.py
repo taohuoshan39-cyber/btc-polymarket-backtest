@@ -75,6 +75,9 @@ def main() -> None:
     hosts = list(dict.fromkeys([BASE_URL, "https://api.binance.com", "https://api1.binance.com", "https://api-gcp.binance.com"]))
     calls = [
         ("category_list", "/sapi/v1/w3w/wallet/prediction/category/list", {}),
+        # Exact minimal request from the official documentation. This separates
+        # product/region availability from a bad category or status filter.
+        ("market_list_all", "/sapi/v1/w3w/wallet/prediction/market/list", {}),
         ("market_list", "/sapi/v1/w3w/wallet/prediction/market/list", {
             "l1Category": "crypto", "l2Category": "up-down", "sortBy": "END_DATE",
             "orderBy": "ASC", "offset": 0, "limit": 100,

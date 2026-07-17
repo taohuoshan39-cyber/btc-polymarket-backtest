@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: value-profile-60d-validation
+# Strategy: value-growth-vs-defensive-60d-validation
 
 on:
   workflow_dispatch:
@@ -97,7 +97,15 @@ jobs:
             --predictions pm15_predictions.csv \
             --bankroll 1000 --edge 0.06 --min-votes 29 --min-paid 0.40 \
             --kelly-fraction 0.25 --max-position 0.03 --slippage 0.01 \
+            --profit-reinvest 1 --dd-soft 1 --dd-hard 1 \
             --out value_growth_report.json
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 29 --min-paid 0.40 \
+            --kelly-fraction 0.25 --max-position 0.0275 --slippage 0.01 \
+            --profit-reinvest 1 --risk-capital-cap 3000 --dd-soft 1 --dd-hard 1 \
+            --out value_growth_defensive_report.json
           python "$GITHUB_WORKSPACE/risk_backtest.py" \
             --markets pm_history.csv \
             --predictions pm15_predictions.csv \

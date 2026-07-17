@@ -29,7 +29,7 @@ def wilson_lower(wins: int, total: int, z: float = 1.0) -> float:
     return (c - r) / d
 
 
-def load_events(markets_path: str, predictions_path: str) -> pd.DataFrame:
+def load_events(markets_path: str, predictions_path: str, btc_path: str | None = None) -> pd.DataFrame:
     m = pd.read_csv(markets_path)
     p = pd.read_csv(predictions_path)
     if "start_ts" not in p:
@@ -40,13 +40,42 @@ def load_events(markets_path: str, predictions_path: str) -> pd.DataFrame:
     z = m.merge(p, on="start_ts", suffixes=("_market", "_model"))
     z = z.dropna(subset=["actual", "prediction", "up_price", "down_price"])
     z = z[(z["up_votes"] >= 28) | (z["down_votes"] >= 28)].copy()
-    return z.sort_values("start_ts").reset_index(drop=True)
+    z = z.sort_values("start_ts").reset_index(drop=True)
+    z["decision_ts"] = z["start_ts"] + 300
+    if not btc_path:
+        z["vol_ratio"] = z["range_ratio"] = 1.0
+        z["shock_z"] = 0.0
+        return z
+
+    b = pd.read_csv(btc_path).sort_values("timestamp")
+    b["btc_ts"] = (b["timestamp"] // 1000).astype("int64")
+    ret1 = b["close"].pct_change()
+    vol30 = ret1.rolling(30, min_periods=20).std()
+    vol_base = vol30.rolling(360, min_periods=120).median()
+    range15 = (
+        b["high"].rolling(15, min_periods=10).max()
+        - b["low"].rolling(15, min_periods=10).min()
+    ) / b["close"]
+    range_base = range15.rolling(360, min_periods=120).median()
+    shock_scale = ret1.rolling(360, min_periods=120).std() * np.sqrt(5.0)
+    b["vol_ratio"] = vol30 / vol_base
+    b["range_ratio"] = range15 / range_base
+    b["shock_z"] = b["close"].pct_change(5).abs() / shock_scale
+    cols = ["btc_ts", "vol_ratio", "range_ratio", "shock_z"]
+    return pd.merge_asof(
+        z.sort_values("decision_ts"),
+        b[cols].replace([np.inf, -np.inf], np.nan).sort_values("btc_ts"),
+        left_on="decision_ts",
+        right_on="btc_ts",
+        direction="backward",
+    ).fillna({"vol_ratio": 1.0, "range_ratio": 1.0, "shock_z": 0.0})
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--markets", required=True)
     ap.add_argument("--predictions", required=True)
+    ap.add_argument("--btc")
     ap.add_argument("--out", default="risk_report.json")
     ap.add_argument("--bankroll", type=float, default=1000.0)
     ap.add_argument("--edge", type=float, default=0.06)
@@ -64,9 +93,16 @@ def main() -> None:
     ap.add_argument("--dd-hard", type=float, default=0.07)
     ap.add_argument("--dd-soft-mult", type=float, default=0.70)
     ap.add_argument("--dd-hard-mult", type=float, default=0.40)
+    ap.add_argument("--pretrade-regime-filter", action="store_true")
+    ap.add_argument("--max-vol-ratio", type=float, default=1.8)
+    ap.add_argument("--max-range-ratio", type=float, default=2.2)
+    ap.add_argument("--max-shock-z", type=float, default=3.0)
+    ap.add_argument("--require-executed-trades", action="store_true")
+    ap.add_argument("--max-vwap-deviation", type=float, default=0.0)
+    ap.add_argument("--max-complement-gap", type=float, default=0.0)
     a = ap.parse_args()
 
-    z = load_events(a.markets, a.predictions)
+    z = load_events(a.markets, a.predictions, a.btc)
     bankroll = a.bankroll
     peak = bankroll
     loss_streak = 0
@@ -97,6 +133,37 @@ def main() -> None:
             continue
         if paid < a.min_paid:
             skipped["price_below_winrate_floor"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
+
+        # Hard pre-trade gates: never wait for losses before reacting to a shock.
+        if a.pretrade_regime_filter and (
+            float(r["vol_ratio"]) > a.max_vol_ratio
+            or float(r["range_ratio"]) > a.max_range_ratio
+            or float(r["shock_z"]) > a.max_shock_z
+        ):
+            skipped["extreme_regime"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
+
+        if a.require_executed_trades and r.get("price_source") != "executed_trade":
+            skipped["no_executed_trade"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
+        selected_vwap = r.get("up_vwap_60s") if direction == 1 else r.get("down_vwap_60s")
+        if a.max_vwap_deviation > 0 and (
+            pd.isna(selected_vwap) or abs(market_price - float(selected_vwap)) > a.max_vwap_deviation
+        ):
+            skipped["unstable_trade_price"] += 1
+            outcomes.append(int(correct))
+            side_outcomes[direction].append(int(correct))
+            continue
+        complement_gap = abs(float(r.get("up_price", 0.5)) + float(r.get("down_price", 0.5)) - 1.0)
+        if a.max_complement_gap > 0 and complement_gap > a.max_complement_gap:
+            skipped["incoherent_complement_prices"] += 1
             outcomes.append(int(correct))
             side_outcomes[direction].append(int(correct))
             continue
@@ -213,6 +280,11 @@ def main() -> None:
                 "drawdown": bankroll - peak,
                 "loss_streak_after": loss_streak,
                 "risk_action": action,
+                "vol_ratio": float(r["vol_ratio"]),
+                "range_ratio": float(r["range_ratio"]),
+                "shock_z": float(r["shock_z"]),
+                "vwap_deviation": None if pd.isna(selected_vwap) else abs(market_price - float(selected_vwap)),
+                "complement_gap": complement_gap,
             }
         )
         outcomes.append(int(correct))
@@ -251,6 +323,13 @@ def main() -> None:
             "risk_capital_cap": a.risk_capital_cap,
             "fixed_stake": a.fixed_stake,
             "daily_stop_fraction": a.daily_stop,
+            "pretrade_regime_filter": a.pretrade_regime_filter,
+            "maximum_volatility_ratio": a.max_vol_ratio,
+            "maximum_range_ratio": a.max_range_ratio,
+            "maximum_shock_z": a.max_shock_z,
+            "require_executed_trades": a.require_executed_trades,
+            "maximum_vwap_deviation": a.max_vwap_deviation,
+            "maximum_complement_gap": a.max_complement_gap,
             "drawdown_throttle": {
                 "soft_drawdown": a.dd_soft,
                 "soft_multiplier": a.dd_soft_mult,

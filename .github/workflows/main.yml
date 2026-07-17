@@ -73,7 +73,7 @@ jobs:
       - name: Normalize prediction timestamps
         working-directory: app
         run: |
-          python -c "import pandas as pd; p=pd.read_csv('pm15_predictions.csv'); p.rename(columns={p.columns[0]:'timestamp'}).to_csv('pm15_predictions.csv',index=False)"
+          python -c "import pandas as pd; p=pd.read_csv('pm15_predictions.csv'); p=p.rename(columns={p.columns[0]:'timestamp'}).drop(columns=['actual'],errors='ignore'); p.to_csv('pm15_predictions.csv',index=False)"
 
       - name: Exact Polymarket backtest
         working-directory: app

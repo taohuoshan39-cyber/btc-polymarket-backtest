@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: stable-vs-value-90d-fast-validation
+# Strategy: guarded-stable-vs-value-90d-validation
 
 on:
   workflow_dispatch:
@@ -116,6 +116,15 @@ jobs:
           python "$GITHUB_WORKSPACE/risk_backtest.py" \
             --markets pm_history.csv \
             --predictions pm15_predictions.csv \
+            --btc BTCUSDT_1m.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 30 --min-paid 0.45 \
+            --kelly-fraction 0.25 --max-position 0.02 --slippage 0.01 \
+            --pretrade-regime-filter --require-executed-trades \
+            --max-vwap-deviation 0.12 --max-complement-gap 0.10 \
+            --out value_guarded_report.json
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
             --bankroll 1000 --edge 0.06 --min-votes 30 --min-paid 0.55 \
             --kelly-fraction 0.25 --max-position 0.025 --slippage 0.01 \
             --out value_high_win_report.json
@@ -149,6 +158,14 @@ jobs:
             --base-position 0.01 \
             --slippage 0.01 \
             --out stable_profit_locked_report.json
+          python "$GITHUB_WORKSPACE/balanced_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --btc BTCUSDT_1m.csv \
+            --bankroll 1000 --base-position 0.01 --slippage 0.01 \
+            --pretrade-regime-filter --require-executed-trades \
+            --max-vwap-deviation 0.12 --max-complement-gap 0.10 \
+            --out stable_guarded_report.json
           python "$GITHUB_WORKSPACE/balanced_backtest.py" \
             --markets pm_history.csv \
             --predictions pm15_predictions.csv \

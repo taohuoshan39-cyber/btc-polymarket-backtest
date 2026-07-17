@@ -58,6 +58,8 @@ def main() -> None:
     ap.add_argument("--min-paid", type=float, default=0.0)
     ap.add_argument("--profit-reinvest", type=float, default=1.0)
     ap.add_argument("--risk-capital-cap", type=float, default=0.0)
+    ap.add_argument("--fixed-stake", type=float, default=0.0)
+    ap.add_argument("--daily-stop", type=float, default=0.03)
     ap.add_argument("--dd-soft", type=float, default=0.04)
     ap.add_argument("--dd-hard", type=float, default=0.07)
     ap.add_argument("--dd-soft-mult", type=float, default=0.70)
@@ -140,7 +142,7 @@ def main() -> None:
             outcomes.append(int(correct))
             side_outcomes[direction].append(int(correct))
             continue
-        if day_pnl[day] <= -0.03 * max(a.bankroll, bankroll):
+        if a.daily_stop > 0 and day_pnl[day] <= -a.daily_stop * max(a.bankroll, bankroll):
             skipped["daily_stop"] += 1
             outcomes.append(int(correct))
             side_outcomes[direction].append(int(correct))
@@ -159,7 +161,7 @@ def main() -> None:
         risk_capital = a.bankroll + max(0.0, bankroll - a.bankroll) * a.profit_reinvest
         if a.risk_capital_cap > 0:
             risk_capital = min(risk_capital, a.risk_capital_cap)
-        stake = risk_capital * fraction
+        stake = a.fixed_stake if a.fixed_stake > 0 else risk_capital * fraction
         if stake < 1.0:
             skipped["stake_too_small"] += 1
             outcomes.append(int(correct))
@@ -247,6 +249,8 @@ def main() -> None:
             "minimum_paid_price": a.min_paid,
             "profit_reinvest_fraction": a.profit_reinvest,
             "risk_capital_cap": a.risk_capital_cap,
+            "fixed_stake": a.fixed_stake,
+            "daily_stop_fraction": a.daily_stop,
             "drawdown_throttle": {
                 "soft_drawdown": a.dd_soft,
                 "soft_multiplier": a.dd_soft_mult,
@@ -258,7 +262,7 @@ def main() -> None:
             "three_losses": "cool down 4 eligible signals",
             "five_losses": "pause 16 eligible signals",
             "side_drift": "pause one direction for 12 signals",
-            "daily_stop": "3% of bankroll",
+            "daily_stop": "disabled" if a.daily_stop <= 0 else f"{a.daily_stop:.1%} of bankroll",
             "recovery": "half size until two wins",
         },
         "research_warning": "Backtest only. Validate on longer walk-forward and live paper data.",

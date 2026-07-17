@@ -101,6 +101,17 @@ jobs:
             --slippage 0.01 \
             --out risk_report.json
 
+      - name: Balanced return-first backtest
+        working-directory: app
+        run: |
+          python "$GITHUB_WORKSPACE/balanced_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 \
+            --base-position 0.01 \
+            --slippage 0.01 \
+            --out balanced_report.json
+
       - name: Upload results
         uses: actions/upload-artifact@v4
         if: always()

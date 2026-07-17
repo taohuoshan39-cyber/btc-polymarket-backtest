@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: balanced-v4-full-resume
+# Strategy: value-profile-60d-validation
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       windows:
         description: 回测轮数
         required: true
-        default: "2880"
+        default: "5760"
   push:
     branches: [main]
     paths:
@@ -51,7 +51,7 @@ jobs:
         run: |
           python polymarket_history.py \
             --anchor-slug btc-updown-15m-1784117700 \
-            --windows "${{ inputs.windows || '2880' }}" \
+            --windows "${{ github.event_name == 'schedule' && '2880' || inputs.windows || '5760' }}" \
             --decision-minute 5 \
             --out pm_history.csv
 
@@ -62,7 +62,7 @@ jobs:
           sed -i 's/+300000/+60000/' fetch_binance.py
           sed -i 's#https://api.binance.com#https://data-api.binance.vision#' fetch_binance.py
           python fetch_binance.py \
-            --days 45 \
+            --days ${{ github.event_name == 'schedule' && '45' || '75' }} \
             --out BTCUSDT_1m.csv
 
       - name: Train 31 agents
@@ -89,18 +89,27 @@ jobs:
             --slippage 0.01 \
             --out exact_report.json
 
-      - name: Value and risk backtest
+      - name: Value profiles backtest
         working-directory: app
         run: |
           python "$GITHUB_WORKSPACE/risk_backtest.py" \
             --markets pm_history.csv \
             --predictions pm15_predictions.csv \
-            --bankroll 1000 \
-            --edge 0.06 \
-            --kelly-fraction 0.25 \
-            --max-position 0.02 \
-            --slippage 0.01 \
-            --out risk_report.json
+            --bankroll 1000 --edge 0.06 --min-votes 29 --min-paid 0.40 \
+            --kelly-fraction 0.25 --max-position 0.03 --slippage 0.01 \
+            --out value_growth_report.json
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 30 --min-paid 0.45 \
+            --kelly-fraction 0.25 --max-position 0.02 --slippage 0.01 \
+            --out value_balanced_report.json
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 30 --min-paid 0.55 \
+            --kelly-fraction 0.25 --max-position 0.025 --slippage 0.01 \
+            --out value_high_win_report.json
 
       - name: Balanced return-first backtest
         working-directory: app

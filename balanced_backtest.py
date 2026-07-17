@@ -59,7 +59,7 @@ def main() -> None:
             cooldown -= 1
             skipped["five_loss_cooldown"] += 1
             continue
-        if day_pnl[day] <= -0.05 * max(a.bankroll, bankroll):
+        if day_pnl[day] <= -0.04 * max(a.bankroll, bankroll):
             skipped["daily_stop"] += 1
             continue
 
@@ -75,12 +75,16 @@ def main() -> None:
 
         vote_strength = max(int(r.up_votes), int(r.down_votes))
         vote_mult = 1.10 if vote_strength >= 30 else (0.90 if vote_strength == 28 else 1.0)
-        risk_mult = 0.60 if caution_left else 1.0
+        current_dd = (bankroll - peak) / peak if peak else 0.0
+        drawdown_mult = 0.40 if current_dd <= -0.07 else (0.70 if current_dd <= -0.04 else 1.0)
+        risk_mult = (0.60 if caution_left else 1.0) * drawdown_mult
 
         recent_side = list(side_returns[direction])
         side_mult = 0.65 if len(recent_side) >= 10 and np.mean(recent_side) < 0 else 1.0
         fraction = min(0.02, a.base_position * value_mult * vote_mult * risk_mult * side_mult)
-        stake = bankroll * fraction
+        # Lock half of accumulated profit and size risk from the remaining capital.
+        risk_capital = a.bankroll + max(0.0, bankroll - a.bankroll) * 0.50
+        stake = risk_capital * fraction
         fee = stake * fee_rate(paid)
         pnl = stake / paid - stake - fee if correct else -stake - fee
         bankroll += pnl
@@ -138,7 +142,9 @@ def main() -> None:
             "two_losses": "reduce 40% for next 3 trades",
             "five_losses": "pause only 4 signals",
             "side_drift": "reduce that side 35%, do not disable it",
-            "daily_stop": "5% of bankroll",
+            "daily_stop": "4% of bankroll",
+            "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",
+            "profit_lock": "only half of accumulated profit increases position size",
             "price_tiers": "add size below 0.70; cut size above 0.82",
         },
         "research_warning": "Backtest only; parameters require longer walk-forward validation.",

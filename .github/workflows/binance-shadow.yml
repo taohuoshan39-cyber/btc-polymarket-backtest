@@ -1,0 +1,42 @@
+name: Binance BTC 15m Shadow Probe
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "2,17,32,47 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binance-btc-15m-shadow
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TZ: Asia/Shanghai
+      BINANCE_API_KEY: ${{ secrets.BINANCE_API_KEY }}
+      BINANCE_API_SECRET: ${{ secrets.BINANCE_API_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Verify encrypted credentials exist
+        shell: bash
+        run: |
+          test -n "$BINANCE_API_KEY" || { echo "Missing BINANCE_API_KEY secret"; exit 1; }
+          test -n "$BINANCE_API_SECRET" || { echo "Missing BINANCE_API_SECRET secret"; exit 1; }
+      - name: Discover live BTC 15-minute prediction market
+        run: python binance_prediction_probe.py
+      - name: Save read-only snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: binance-prediction-snapshot-${{ github.run_number }}
+          path: binance_prediction_snapshot.json
+          if-no-files-found: ignore
+          retention-days: 7

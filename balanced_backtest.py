@@ -73,6 +73,9 @@ def main() -> None:
     ap.add_argument("--bankroll", type=float, default=1000.0)
     ap.add_argument("--base-position", type=float, default=0.01)
     ap.add_argument("--slippage", type=float, default=0.01)
+    ap.add_argument("--profit-reinvest", type=float, default=0.0)
+    ap.add_argument("--fixed-stake", type=float, default=0.0)
+    ap.add_argument("--daily-stop", type=float, default=0.04)
     a = ap.parse_args()
 
     z = load_events(a.markets, a.predictions, a.btc)
@@ -113,7 +116,7 @@ def main() -> None:
             paper_results.append(int(correct))
             skipped["regime_trigger"] += 1
             continue
-        if day_pnl[day] <= -0.04 * max(a.bankroll, bankroll):
+        if a.daily_stop > 0 and day_pnl[day] <= -a.daily_stop * max(a.bankroll, bankroll):
             skipped["daily_stop"] += 1
             continue
 
@@ -137,9 +140,9 @@ def main() -> None:
         recent_side = list(side_returns[direction])
         side_mult = 0.65 if len(recent_side) >= 10 and np.mean(recent_side) < 0 else 1.0
         fraction = min(0.02, a.base_position * value_mult * vote_mult * risk_mult * side_mult)
-        # Keep position risk anchored to initial capital; accumulated profits are locked.
-        risk_capital = a.bankroll
-        stake = risk_capital * fraction
+        # Money management is selectable without changing the prediction model.
+        risk_capital = a.bankroll + max(0.0, bankroll - a.bankroll) * a.profit_reinvest
+        stake = a.fixed_stake if a.fixed_stake > 0 else risk_capital * fraction
         fee = stake * fee_rate(paid)
         pnl = stake / paid - stake - fee if correct else -stake - fee
         bankroll += pnl
@@ -200,6 +203,8 @@ def main() -> None:
         "skipped": dict(skipped),
         "rules": {
             "core_position": a.base_position,
+            "fixed_stake": a.fixed_stake,
+            "profit_reinvest_fraction": a.profit_reinvest,
             "maximum_position": 0.02,
             "two_losses": "reduce 40% for next 3 trades",
             "two_losses": "re-evaluate regime; halve size while still normal",
@@ -207,9 +212,9 @@ def main() -> None:
             "regime_pause": "monitor without orders until 3 normal checks and 2/3 paper wins",
             "recovery": "resume normal sizing after regime and paper checks pass",
             "side_drift": "reduce that side 35%, do not disable it",
-            "daily_stop": "4% of bankroll",
+            "daily_stop": "disabled" if a.daily_stop <= 0 else f"{a.daily_stop:.1%} of bankroll",
             "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",
-            "profit_lock": "accumulated profit does not increase position size",
+            "profit_lock": "enabled" if a.profit_reinvest <= 0 else "disabled/full reinvest",
             "price_tiers": "add size below 0.70; cut size above 0.82",
         },
         "research_warning": "Backtest only; parameters require longer walk-forward validation.",

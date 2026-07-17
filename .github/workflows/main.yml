@@ -28,6 +28,9 @@ jobs:
     timeout-minutes: 180
 
     steps:
+      - name: Checkout strategy code
+        uses: actions/checkout@v4
+
       - name: Download project
         run: |
           curl -L "https://github.com/user-attachments/files/30051712/btc_consensus_v3.zip" -o project.zip
@@ -84,6 +87,19 @@ jobs:
             --stake 10 \
             --slippage 0.01 \
             --out exact_report.json
+
+      - name: Value and risk backtest
+        working-directory: app
+        run: |
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 \
+            --edge 0.06 \
+            --kelly-fraction 0.25 \
+            --max-position 0.02 \
+            --slippage 0.01 \
+            --out risk_report.json
 
       - name: Upload results
         uses: actions/upload-artifact@v4

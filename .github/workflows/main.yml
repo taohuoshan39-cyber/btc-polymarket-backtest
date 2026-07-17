@@ -6,7 +6,7 @@ on:
       windows:
         description: 回测轮数
         required: true
-        default: "960"
+        default: "2880"
   push:
     branches: [main]
     paths:
@@ -20,7 +20,7 @@ env:
 
 concurrency:
   group: btc-polymarket-15m-backtest
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   backtest:
@@ -50,7 +50,7 @@ jobs:
         run: |
           python polymarket_history.py \
             --anchor-slug btc-updown-15m-1784117700 \
-            --windows "${{ inputs.windows || '960' }}" \
+            --windows "${{ inputs.windows || '2880' }}" \
             --decision-minute 5 \
             --out pm_history.csv
 
@@ -61,7 +61,7 @@ jobs:
           sed -i 's/+300000/+60000/' fetch_binance.py
           sed -i 's#https://api.binance.com#https://data-api.binance.vision#' fetch_binance.py
           python fetch_binance.py \
-            --days 15 \
+            --days 45 \
             --out BTCUSDT_1m.csv
 
       - name: Train 31 agents

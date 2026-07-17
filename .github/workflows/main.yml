@@ -1,4 +1,5 @@
 name: BTC Polymarket 15m Backtest
+# Strategy: balanced-v2-profit-lock
 
 on:
   workflow_dispatch:

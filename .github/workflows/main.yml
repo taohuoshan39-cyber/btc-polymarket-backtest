@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: balanced-v2-profit-lock
+# Strategy: balanced-v3-regime-gate
 
 on:
   workflow_dispatch:
@@ -108,6 +108,7 @@ jobs:
           python "$GITHUB_WORKSPACE/balanced_backtest.py" \
             --markets pm_history.csv \
             --predictions pm15_predictions.csv \
+            --btc BTCUSDT_1m.csv \
             --bankroll 1000 \
             --base-position 0.01 \
             --slippage 0.01 \

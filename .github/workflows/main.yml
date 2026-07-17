@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: value-growth-vs-defensive-60d-validation
+# Strategy: fixed-10u-vs-full-compound-60d-validation
 
 on:
   workflow_dispatch:
@@ -118,6 +118,24 @@ jobs:
             --bankroll 1000 --edge 0.06 --min-votes 30 --min-paid 0.55 \
             --kelly-fraction 0.25 --max-position 0.025 --slippage 0.01 \
             --out value_high_win_report.json
+
+      - name: Pure stake comparison (same signals)
+        working-directory: app
+        run: |
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 29 --min-paid 0.40 \
+            --kelly-fraction 0.25 --max-position 0.03 --slippage 0.01 \
+            --fixed-stake 10 --daily-stop 0 --dd-soft 1 --dd-hard 1 \
+            --out comparison_fixed_10u_report.json
+          python "$GITHUB_WORKSPACE/risk_backtest.py" \
+            --markets pm_history.csv \
+            --predictions pm15_predictions.csv \
+            --bankroll 1000 --edge 0.06 --min-votes 29 --min-paid 0.40 \
+            --kelly-fraction 0.25 --max-position 0.03 --slippage 0.01 \
+            --profit-reinvest 1 --daily-stop 0 --dd-soft 1 --dd-hard 1 \
+            --out comparison_full_compound_report.json
 
       - name: Balanced return-first backtest
         working-directory: app

@@ -82,7 +82,6 @@ def main() -> None:
     regime_paused = False
     normal_regime_streak = 0
     paper_results: deque[int] = deque(maxlen=3)
-    recovery_left = 0
     day_pnl = defaultdict(float)
     side_returns = {0: deque(maxlen=20), 1: deque(maxlen=20)}
     rows = []
@@ -104,7 +103,6 @@ def main() -> None:
             # Re-enable only after 3 normal observations and 2/3 paper wins.
             if normal_regime_streak >= 3 and len(paper_results) == 3 and sum(paper_results) >= 2:
                 regime_paused = False
-                recovery_left = 3
                 loss_streak = 0
                 skipped["regime_recovered"] += 1
             continue
@@ -134,8 +132,7 @@ def main() -> None:
         current_dd = (bankroll - peak) / peak if peak else 0.0
         drawdown_mult = 0.40 if current_dd <= -0.07 else (0.70 if current_dd <= -0.04 else 1.0)
         loss_mult = 0.50 if loss_streak >= 2 else 1.0
-        recovery_mult = 0.50 if recovery_left else 1.0
-        risk_mult = (0.60 if caution_left else 1.0) * drawdown_mult * loss_mult * recovery_mult
+        risk_mult = (0.60 if caution_left else 1.0) * drawdown_mult * loss_mult
 
         recent_side = list(side_returns[direction])
         side_mult = 0.65 if len(recent_side) >= 10 and np.mean(recent_side) < 0 else 1.0
@@ -165,8 +162,6 @@ def main() -> None:
                 action = "regime_review_after_5_losses"
         if caution_left:
             caution_left -= 1
-        if recovery_left:
-            recovery_left -= 1
 
         rows.append(
             {
@@ -210,7 +205,7 @@ def main() -> None:
             "two_losses": "re-evaluate regime; halve size while still normal",
             "five_losses": "force regime review",
             "regime_pause": "monitor without orders until 3 normal checks and 2/3 paper wins",
-            "recovery": "half size for first 3 trades",
+            "recovery": "resume normal sizing after regime and paper checks pass",
             "side_drift": "reduce that side 35%, do not disable it",
             "daily_stop": "4% of bankroll",
             "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",

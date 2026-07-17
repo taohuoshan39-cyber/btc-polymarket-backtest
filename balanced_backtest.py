@@ -14,7 +14,7 @@ def fee_rate(price: float) -> float:
     return 0.0156 * (x / 0.5) ** 2
 
 
-def load_events(markets: str, predictions: str) -> pd.DataFrame:
+def load_events(markets: str, predictions: str, btc_path: str | None = None) -> pd.DataFrame:
     m = pd.read_csv(markets)
     p = pd.read_csv(predictions).drop(columns=["actual"], errors="ignore")
     if "start_ts" not in p:
@@ -24,24 +24,65 @@ def load_events(markets: str, predictions: str) -> pd.DataFrame:
     z = m.merge(p, on="start_ts", suffixes=("_market", "_model"))
     z = z.dropna(subset=["actual", "prediction", "up_price", "down_price"])
     z = z[(z.up_votes >= 28) | (z.down_votes >= 28)].copy()
-    return z.sort_values("start_ts").reset_index(drop=True)
+    z = z.sort_values("start_ts").reset_index(drop=True)
+    z["decision_ts"] = z["start_ts"] + 300
+    if not btc_path:
+        z["abnormal_regime"] = False
+        z["vol_ratio"] = 1.0
+        z["range_ratio"] = 1.0
+        z["shock_z"] = 0.0
+        return z
+
+    b = pd.read_csv(btc_path).sort_values("timestamp")
+    b["btc_ts"] = (b["timestamp"] // 1000).astype("int64")
+    ret1 = b["close"].pct_change()
+    vol30 = ret1.rolling(30, min_periods=20).std()
+    vol_base = vol30.rolling(360, min_periods=120).median()
+    range15 = (
+        b["high"].rolling(15, min_periods=10).max()
+        - b["low"].rolling(15, min_periods=10).min()
+    ) / b["close"]
+    range_base = range15.rolling(360, min_periods=120).median()
+    shock_scale = ret1.rolling(360, min_periods=120).std() * np.sqrt(5.0)
+    b["vol_ratio"] = (vol30 / vol_base).replace([np.inf, -np.inf], np.nan)
+    b["range_ratio"] = (range15 / range_base).replace([np.inf, -np.inf], np.nan)
+    b["shock_z"] = (b["close"].pct_change(5).abs() / shock_scale).replace(
+        [np.inf, -np.inf], np.nan
+    )
+    b["abnormal_regime"] = (
+        (b["vol_ratio"] > 1.8)
+        | (b["range_ratio"] > 2.2)
+        | (b["shock_z"] > 3.0)
+    )
+    cols = ["btc_ts", "abnormal_regime", "vol_ratio", "range_ratio", "shock_z"]
+    return pd.merge_asof(
+        z.sort_values("decision_ts"),
+        b[cols].dropna(subset=["btc_ts"]).sort_values("btc_ts"),
+        left_on="decision_ts",
+        right_on="btc_ts",
+        direction="backward",
+    ).fillna({"abnormal_regime": False, "vol_ratio": 1.0, "range_ratio": 1.0, "shock_z": 0.0})
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--markets", required=True)
     ap.add_argument("--predictions", required=True)
+    ap.add_argument("--btc")
     ap.add_argument("--out", default="balanced_report.json")
     ap.add_argument("--bankroll", type=float, default=1000.0)
     ap.add_argument("--base-position", type=float, default=0.01)
     ap.add_argument("--slippage", type=float, default=0.01)
     a = ap.parse_args()
 
-    z = load_events(a.markets, a.predictions)
+    z = load_events(a.markets, a.predictions, a.btc)
     bankroll = peak = a.bankroll
     loss_streak = 0
     caution_left = 0
-    cooldown = 0
+    regime_paused = False
+    normal_regime_streak = 0
+    paper_results: deque[int] = deque(maxlen=3)
+    recovery_left = 0
     day_pnl = defaultdict(float)
     side_returns = {0: deque(maxlen=20), 1: deque(maxlen=20)}
     rows = []
@@ -55,9 +96,24 @@ def main() -> None:
         paid = min(0.99, price + a.slippage)
         day = pd.to_datetime(int(r.start_ts), unit="s", utc=True).strftime("%Y-%m-%d")
 
-        if cooldown:
-            cooldown -= 1
-            skipped["five_loss_cooldown"] += 1
+        abnormal = bool(r.abnormal_regime)
+        if regime_paused:
+            normal_regime_streak = normal_regime_streak + 1 if not abnormal else 0
+            paper_results.append(int(correct))
+            skipped["regime_monitor"] += 1
+            # Re-enable only after 3 normal observations and 2/3 paper wins.
+            if normal_regime_streak >= 3 and len(paper_results) == 3 and sum(paper_results) >= 2:
+                regime_paused = False
+                recovery_left = 3
+                loss_streak = 0
+                skipped["regime_recovered"] += 1
+            continue
+        if loss_streak >= 2 and abnormal:
+            regime_paused = True
+            normal_regime_streak = 0
+            paper_results.clear()
+            paper_results.append(int(correct))
+            skipped["regime_trigger"] += 1
             continue
         if day_pnl[day] <= -0.04 * max(a.bankroll, bankroll):
             skipped["daily_stop"] += 1
@@ -77,7 +133,9 @@ def main() -> None:
         vote_mult = 1.10 if vote_strength >= 30 else (0.90 if vote_strength == 28 else 1.0)
         current_dd = (bankroll - peak) / peak if peak else 0.0
         drawdown_mult = 0.40 if current_dd <= -0.07 else (0.70 if current_dd <= -0.04 else 1.0)
-        risk_mult = (0.60 if caution_left else 1.0) * drawdown_mult
+        loss_mult = 0.50 if loss_streak >= 2 else 1.0
+        recovery_mult = 0.50 if recovery_left else 1.0
+        risk_mult = (0.60 if caution_left else 1.0) * drawdown_mult * loss_mult * recovery_mult
 
         recent_side = list(side_returns[direction])
         side_mult = 0.65 if len(recent_side) >= 10 and np.mean(recent_side) < 0 else 1.0
@@ -101,10 +159,14 @@ def main() -> None:
                 caution_left = 3
                 action = "reduce_40pct_next_3"
             if loss_streak >= 5:
-                cooldown = 4
-                action = "pause_4_after_5_losses"
+                regime_paused = True
+                normal_regime_streak = 0
+                paper_results.clear()
+                action = "regime_review_after_5_losses"
         if caution_left:
             caution_left -= 1
+        if recovery_left:
+            recovery_left -= 1
 
         rows.append(
             {
@@ -120,6 +182,10 @@ def main() -> None:
                 "drawdown": bankroll - peak,
                 "loss_streak_after": loss_streak,
                 "risk_action": action,
+                "abnormal_regime": abnormal,
+                "vol_ratio": float(r.vol_ratio),
+                "range_ratio": float(r.range_ratio),
+                "shock_z": float(r.shock_z),
             }
         )
 
@@ -134,13 +200,17 @@ def main() -> None:
         "return_on_turnover": float(t.pnl.sum() / t.stake.sum()) if len(t) else None,
         "ending_bankroll": float(bankroll),
         "max_drawdown": float(t.drawdown.min()) if len(t) else None,
+        "max_drawdown_pct": float(((t.bankroll - t.bankroll.cummax()) / t.bankroll.cummax()).min()) if len(t) else None,
         "sharpe_per_trade": float(returns.mean() / returns.std()) if len(t) and returns.std() > 0 else None,
         "skipped": dict(skipped),
         "rules": {
             "core_position": a.base_position,
             "maximum_position": 0.02,
             "two_losses": "reduce 40% for next 3 trades",
-            "five_losses": "pause only 4 signals",
+            "two_losses": "re-evaluate regime; halve size while still normal",
+            "five_losses": "force regime review",
+            "regime_pause": "monitor without orders until 3 normal checks and 2/3 paper wins",
+            "recovery": "half size for first 3 trades",
             "side_drift": "reduce that side 35%, do not disable it",
             "daily_stop": "4% of bankroll",
             "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",

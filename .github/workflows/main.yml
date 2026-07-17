@@ -1,5 +1,5 @@
 name: BTC Polymarket 15m Backtest
-# Strategy: stable-vs-value-90d-validation
+# Strategy: stable-vs-value-90d-fast-validation
 
 on:
   workflow_dispatch:
@@ -49,10 +49,11 @@ jobs:
       - name: Download Polymarket history
         working-directory: app
         run: |
-          python polymarket_history.py \
+          python "$GITHUB_WORKSPACE/polymarket_history_fast.py" \
             --anchor-slug btc-updown-15m-1784117700 \
             --windows "${{ inputs.windows || '8640' }}" \
             --decision-minute 5 \
+            --workers 10 \
             --out pm_history.csv
 
       - name: Download Binance data

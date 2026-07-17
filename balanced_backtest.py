@@ -65,13 +65,13 @@ def main() -> None:
 
         # Core stake remains active. Price tiers add capital where payout is better.
         if paid <= 0.55:
-            value_mult = 1.60
+            value_mult = 1.40
         elif paid <= 0.70:
-            value_mult = 1.30
+            value_mult = 1.20
         elif paid <= 0.82:
-            value_mult = 1.00
+            value_mult = 0.95
         else:
-            value_mult = 0.55
+            value_mult = 0.50
 
         vote_strength = max(int(r.up_votes), int(r.down_votes))
         vote_mult = 1.10 if vote_strength >= 30 else (0.90 if vote_strength == 28 else 1.0)
@@ -82,8 +82,8 @@ def main() -> None:
         recent_side = list(side_returns[direction])
         side_mult = 0.65 if len(recent_side) >= 10 and np.mean(recent_side) < 0 else 1.0
         fraction = min(0.02, a.base_position * value_mult * vote_mult * risk_mult * side_mult)
-        # Lock half of accumulated profit and size risk from the remaining capital.
-        risk_capital = a.bankroll + max(0.0, bankroll - a.bankroll) * 0.50
+        # Keep position risk anchored to initial capital; accumulated profits are locked.
+        risk_capital = a.bankroll
         stake = risk_capital * fraction
         fee = stake * fee_rate(paid)
         pnl = stake / paid - stake - fee if correct else -stake - fee
@@ -144,7 +144,7 @@ def main() -> None:
             "side_drift": "reduce that side 35%, do not disable it",
             "daily_stop": "4% of bankroll",
             "drawdown_throttle": "30% reduction at -4%; 60% reduction at -7%",
-            "profit_lock": "only half of accumulated profit increases position size",
+            "profit_lock": "accumulated profit does not increase position size",
             "price_tiers": "add size below 0.70; cut size above 0.82",
         },
         "research_warning": "Backtest only; parameters require longer walk-forward validation.",

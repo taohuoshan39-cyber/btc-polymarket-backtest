@@ -1,0 +1,38 @@
+name: BTC 24M Data Audit (Luna-data route)
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/btc-24m-audit.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  two-year-collection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      TZ: Asia/Shanghai
+      MODEL_ROUTE: gpt-6-luna
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Ingest public minute prices and audit 24 months
+        run: python two_year_pipeline/ingest_1m.py
+      - name: Archive data quality and checkpoints
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-24m-data-audit
+          path: two_year_data/*.json
+          retention-days: 30
+      - name: Archive 15m OHLC
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-24m-15m-candles
+          path: two_year_data/btc_15m_complete.csv
+          retention-days: 30

@@ -1,0 +1,62 @@
+name: BTC 24M Legacy Consensus Direction Replay
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/btc-24m-legacy-direction.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  legacy-direction:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      TZ: Asia/Shanghai
+      MODEL_ROUTE_DATA: gpt-6-luna
+      MODEL_ROUTE_ALGORITHM_REVIEW: gpt-6-astra-only-if-needed
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Download original consensus v3 code
+        run: |
+          curl -fLsS --retry 3 "https://github.com/user-attachments/files/30051712/btc_consensus_v3.zip" -o original.zip
+          unzip -q original.zip -d app
+          test -f app/polymarket_15m.py
+          pip install -r app/requirements.txt
+      - name: Collect and audit complete 24M Binance 1m candles
+        run: python two_year_pipeline/build_1m.py
+      - name: Replay existing 31-agent prediction implementation
+        working-directory: app
+        run: |
+          python polymarket_15m.py \
+            --csv ../two_year_model_data/BTCUSDT_1m.csv \
+            --decision-minute 5 \
+            --min-train 672 \
+            --out ../two_year_model_data/legacy_direction
+      - name: Summarize direction, not fabricated PNL
+        run: |
+          python - <<'PY'
+          import pandas as pd, json
+          from pathlib import Path
+          d=Path("two_year_model_data")
+          p=pd.read_csv(d/"legacy_direction_predictions.csv")
+          report={"rows":len(p),"fields":list(p.columns),"study":"legacy 31-agent BTC direction replay","economic_pnl":"NOT_VERIFIED_NO_POINT_IN_TIME_EXECUTABLE_QUOTES","original_champions_10829_7301":"SOURCE_NOT_AVAILABLE_NOT_REPLICATED","walk_forward_independence":"REQUIRES_AUDIT"}
+          if {"actual","prediction"}.issubset(p.columns):
+              z=p.dropna(subset=["actual","prediction"])
+              report["direction_accuracy_raw"]=float((z.actual==z.prediction).mean()) if len(z) else None
+              report["labeled_predictions"]=len(z)
+          (d/"legacy_direction_summary.json").write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          PY
+      - name: Save all results on completion or failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-24m-legacy-direction-replay
+          path: |
+            two_year_model_data/*.json
+            two_year_model_data/legacy_direction_*.csv
+            two_year_model_data/legacy_direction_*.graphml
+          retention-days: 30

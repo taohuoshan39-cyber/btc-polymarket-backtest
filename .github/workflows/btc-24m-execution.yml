@@ -1,0 +1,28 @@
+name: BTC 24M Executable Quote Coverage
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/btc-24m-execution.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quote-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    env:
+      TZ: Asia/Shanghai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Audit archived two-sided executable quote coverage across all 24 months
+        run: python two_year_pipeline/execution_coverage.py
+      - name: Persist quote coverage manifest even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: btc-24m-quote-coverage
+          path: two_year_execution/
+          retention-days: 30
